@@ -3,6 +3,22 @@
 `ebinexpy` is an asynchronous Python library for accessing Ebinex accounts,
 market data, and orders.
 
+## Installation
+
+Install the latest release from [PyPI](https://pypi.org/project/ebinexpy/):
+
+```bash
+python3 -m pip install ebinexpy
+```
+
+The examples use `python3` on Linux and macOS; use `py` instead on Windows. The
+version is optional. Use `ebinexpy==0.1.0` only when an application needs to
+reproduce that exact release. To update an existing installation, run:
+
+```bash
+python3 -m pip install --upgrade ebinexpy
+```
+
 ## Quick start
 
 ```python
@@ -28,6 +44,7 @@ asyncio.run(main())
 
 - [Client methods](methods.md): connections, accounts, market data, streams, and orders.
 - [Project README](../README.md): installation, sessions, and overview.
+- [PyPI project](https://pypi.org/project/ebinexpy/): releases and distribution files.
 
 ## Important notes
 

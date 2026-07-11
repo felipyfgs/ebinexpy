@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - Unreleased
+## 0.1.0 - 2026-07-11
 
 - Added the async `EbinexClient` facade with TEST-first lifecycle.
 - Added pluggable memory and secure file session stores.

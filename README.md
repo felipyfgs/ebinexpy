@@ -12,15 +12,48 @@ without explicit opt-in.
 
 ## Installation
 
+`ebinexpy` requires Python 3.11 or newer. Install the latest published version
+from [PyPI](https://pypi.org/project/ebinexpy/):
+
 ```bash
-pip install ebinexpy
+python3 -m pip install ebinexpy
 ```
 
-For development:
+The examples use `python3`, as commonly available on Linux and macOS. On
+Windows, replace `python3` with the Python launcher `py`.
+
+You do not need to specify a version for a normal installation. To reproduce an
+environment with an exact release, pin it explicitly:
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+python3 -m pip install ebinexpy==0.1.0
+```
+
+Upgrade an existing installation to the latest available release with:
+
+```bash
+python3 -m pip install --upgrade ebinexpy
+```
+
+Verify the installed version:
+
+```bash
+python3 -c "import ebinexpy; print(ebinexpy.__version__)"
+```
+
+For local development, install the checkout in editable mode with the
+development dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+```
+
+On Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
 ## Client lifecycle
