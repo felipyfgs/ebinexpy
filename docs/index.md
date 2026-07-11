@@ -12,7 +12,7 @@ python3 -m pip install ebinexpy
 ```
 
 The examples use `python3` on Linux and macOS; use `py` instead on Windows. The
-version is optional. Use `ebinexpy==0.1.0` only when an application needs to
+version is optional. Use `ebinexpy==0.1.1` only when an application needs to
 reproduce that exact release. To update an existing installation, run:
 
 ```bash

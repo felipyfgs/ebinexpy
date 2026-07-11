@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - 2026-07-11
+
+- Clarified installation, version pinning and upgrade commands.
+- Documented portable Python commands for Linux, macOS and Windows.
+- Updated the packaged project documentation published on PyPI.
+
 ## 0.1.0 - 2026-07-11
 
 - Added the async `EbinexClient` facade with TEST-first lifecycle.
