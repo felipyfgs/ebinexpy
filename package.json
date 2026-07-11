@@ -1,0 +1,12 @@
+{
+  "name": "ebinexpy-research",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "explore:traderoom": "node research/explore-traderoom.mjs",
+    "capture:screens": "node research/capture-main-screens.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

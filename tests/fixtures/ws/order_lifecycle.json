@@ -1,0 +1,5 @@
+[
+  {"data":{"event":"single_user_order","payload":{"id":"<order-id>","accountId":"<account-id>","environment":"TEST","symbol":"IDXUSDT","direction":"BULL","candleTimeFrame":"M1","invest":1,"status":"PENDING","createdAt":1783785000542,"candleStartTime":1783785060000,"candleEndTime":1783785120000}}},
+  {"data":{"event":"single_user_order","payload":{"id":"<order-id>","accountId":"<account-id>","environment":"TEST","symbol":"IDXUSDT","direction":"BULL","candleTimeFrame":"M1","invest":1,"status":"OPEN","cop":2995.56,"createdAt":1783785000542,"candleStartTime":1783785060000,"candleEndTime":1783785120000}}},
+  {"data":{"event":"single_user_order","payload":{"id":"<order-id>","accountId":"<account-id>","environment":"TEST","symbol":"IDXUSDT","direction":"BULL","candleTimeFrame":"M1","invest":1,"status":"WIN","cop":2995.56,"ccp":2995.83,"fees":0.04,"profit":0.96,"loss":0,"createdAt":1783785000542,"candleStartTime":1783785060000,"candleEndTime":1783785120000}}}
+]

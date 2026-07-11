@@ -1,0 +1,4 @@
+[
+  {"symbol":"IDXUSDT","symbolLabel":"IDX/USDT","marketStatus":"ACTIVE","configModes":{"OPTION":{"status":"ACTIVE","payout":96,"displayOrder":1,"candleTimeFrames":["M1","M5","M15"]}}},
+  {"symbol":"DOGEUSDT","symbolLabel":"DOGE/USDT","marketStatus":"INACTIVE","configModes":{"OPTION":{"status":"INACTIVE","payout":90,"displayOrder":2,"candleTimeFrames":["M1"]}}}
+]
