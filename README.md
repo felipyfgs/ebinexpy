@@ -26,7 +26,7 @@ You do not need to specify a version for a normal installation. To reproduce an
 environment with an exact release, pin it explicitly:
 
 ```bash
-python3 -m pip install ebinexpy==0.1.1
+python3 -m pip install ebinexpy==0.1.2
 ```
 
 Upgrade an existing installation to the latest available release with:

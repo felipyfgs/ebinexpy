@@ -2,7 +2,7 @@
 
 The project starts from an empty `ebinexpy` workspace. The previous prototype
 proved basic endpoint feasibility but is not a compatibility target. The live
-DEMO capture documented in `docs/research/` confirms cookie/JWT authentication,
+Sanitized DEMO protocol research confirms cookie/JWT authentication,
 account selection by header, REST history, SockJS/STOMP market delivery, order
 states and subscription replay after a network outage.
 

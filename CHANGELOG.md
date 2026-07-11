@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-07-11
+
+- Removed obsolete Node.js and Playwright research tooling.
+- Restricted source distributions to package sources and required release metadata.
+
 ## 0.1.1 - 2026-07-11
 
 - Clarified installation, version pinning and upgrade commands.

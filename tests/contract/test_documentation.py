@@ -16,7 +16,6 @@ GENERATED_DIRECTORIES = {
     ".venv",
     "build",
     "dist",
-    "node_modules",
 }
 
 

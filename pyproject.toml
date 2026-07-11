@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ebinexpy"
-version = "0.1.1"
+version = "0.1.2"
 description = "Async Python library for the Ebinex traderoom"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,6 +40,15 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ebinexpy"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/src/ebinexpy",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"
