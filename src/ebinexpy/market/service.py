@@ -134,7 +134,12 @@ class MarketService:
 
     async def stream_book(self, symbol: str, timeframe: Timeframe) -> EventStream[BookEvent]:
         key = (symbol.upper(), timeframe)
-        environment = self._client.config.environment.value
+        selected = self._client.accounts.selected
+        environment = (
+            selected.environment.value
+            if selected is not None
+            else self._client.config.environment.value
+        )
         destination = f"/topic/book:{environment}:{key[0]}:{timeframe.value}"
         return await self._stream(self._book_streams, key, destination)
 
@@ -153,22 +158,24 @@ class MarketService:
             self._client.events.emit(BrokerTimeEvent(now, broker_time))
         elif event in {"candles_history", "trade"}:
             values = value if isinstance(value, list) else [value]
-            for key, streams in tuple(self._candle_streams.items()):
-                if event == "trade" and not self._destination_matches(destination, "graph", key):
+            for raw in values:
+                if not isinstance(raw, dict):
                     continue
-                for raw in values:
-                    if not isinstance(raw, dict):
-                        continue
-                    item = CandleEvent(now, parse_candle(raw, *key), event == "candles_history")
-                    for stream in tuple(streams):
-                        stream.publish(item)
-                    self._client.events.emit(item)
+                key = self._event_key(destination, "graph", raw)
+                if key is None:
+                    continue
+                streams = self._candle_streams.get(key)
+                if not streams:
+                    continue
+                item = CandleEvent(now, parse_candle(raw, *key), event == "candles_history")
+                for stream in tuple(streams):
+                    stream.publish(item)
+                self._client.events.emit(item)
         elif event == "ticker" and isinstance(value, dict):
-            timeframe = Timeframe(str(value.get("candleTimeFrame", "M1")).upper())
-            for (symbol, frame), streams in tuple(self._ticker_streams.items()):
-                if frame is not timeframe:
-                    continue
-                item = TickerEvent(now, parse_ticker(value, symbol))
+            key = self._event_key(destination, "ticker", value)
+            streams = self._ticker_streams.get(key) if key is not None else None
+            if streams:
+                item = TickerEvent(now, parse_ticker(value, *key))
                 for stream in tuple(streams):
                     stream.publish(item)
                 self._client.events.emit(item)
@@ -176,33 +183,52 @@ class MarketService:
             await self._handle_book(now, value, event == "book", destination)
 
     @staticmethod
-    def _destination_matches(destination: str, kind: str, key: tuple[str, Timeframe]) -> bool:
+    def _destination_key(destination: str, kind: str | None) -> tuple[str, Timeframe] | None:
         parts = destination.split(":")
-        minimum = 3 if kind == "graph" else 4
-        return len(parts) >= minimum and parts[-2:] == [key[0], key[1].value]
+        if len(parts) < 3:
+            return None
+        if kind is not None and not parts[0].endswith(f"/{kind}"):
+            return None
+        try:
+            return parts[-2].upper(), Timeframe(parts[-1].upper())
+        except ValueError:
+            return None
+
+    @classmethod
+    def _event_key(
+        cls, destination: str, kind: str | None, value: dict[str, Any]
+    ) -> tuple[str, Timeframe] | None:
+        destination_key = cls._destination_key(destination, kind)
+        symbol_raw = value.get("symbol")
+        frame_raw = value.get("candleTimeFrame")
+        payload_key: tuple[str, Timeframe] | None = None
+        if symbol_raw and frame_raw:
+            try:
+                payload_key = str(symbol_raw).upper(), Timeframe(str(frame_raw).upper())
+            except ValueError:
+                return None
+        elif symbol_raw or frame_raw:
+            return None
+        if destination_key and payload_key and destination_key != payload_key:
+            return None
+        return payload_key or destination_key
 
     async def _handle_book(
         self, now: datetime, value: dict[str, Any], snapshot: bool, destination: str
     ) -> None:
-        symbol = str(value.get("symbol") or "").upper()
-        frame_raw = value.get("candleTimeFrame")
-        matching = [
-            (key, streams)
-            for key, streams in self._book_streams.items()
-            if (not symbol or key[0] == symbol)
-            and (not frame_raw or key[1].value == frame_raw)
-            and (snapshot or self._destination_matches(destination, "book", key))
-        ]
-        for key, streams in matching:
-            rows: list[dict[str, Any]] = []
-            if snapshot:
-                for side in ("bull", "bear"):
-                    rows.extend(row for row in value.get(side, []) if isinstance(row, dict))
-            else:
-                rows = [value]
-            for row in rows:
-                update: BookUpdate = parse_book_order(row, *key)
-                item = BookEvent(now, update, snapshot)
-                for stream in tuple(streams):
-                    stream.publish(item)
-                self._client.events.emit(item)
+        key = self._event_key(destination, "book", value)
+        streams = self._book_streams.get(key) if key is not None else None
+        if not streams or key is None:
+            return
+        rows: list[dict[str, Any]] = []
+        if snapshot:
+            for side in ("bull", "bear"):
+                rows.extend(row for row in value.get(side, []) if isinstance(row, dict))
+        else:
+            rows = [value]
+        for row in rows:
+            update: BookUpdate = parse_book_order(row, *key)
+            item = BookEvent(now, update, snapshot)
+            for stream in tuple(streams):
+                stream.publish(item)
+            self._client.events.emit(item)

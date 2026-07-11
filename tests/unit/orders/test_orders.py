@@ -99,6 +99,9 @@ class DummyMarket:
     async def get_asset(self, _symbol: str, *, refresh: bool = False) -> Asset:
         return self.asset
 
+    async def list_assets(self) -> list[Asset]:
+        return [self.asset]
+
     def get_broker_time(self) -> None:
         return None
 
@@ -126,11 +129,13 @@ class DummyClient:
         self.market = DummyMarket(asset)
         self.events = EventDispatcher()
         self.supervisor = DummySupervisor()
+        self.requests: list[dict[str, object]] = []
 
     def require_supervisor(self) -> DummySupervisor:
         return self.supervisor
 
     async def _request(self, *_args: object, **_kwargs: object) -> httpx.Response:
+        self.requests.append(_kwargs["params"])  # type: ignore[arg-type]
         return httpx.Response(200, json=[])
 
 
@@ -193,3 +198,82 @@ async def test_ambiguous_send_failure_is_unknown_and_never_replayed() -> None:
     with pytest.raises(OrderSubmissionUnknownError):
         await service.place(request)
     assert sends == 1
+
+
+@pytest.mark.asyncio
+async def test_late_confirmation_cannot_satisfy_the_next_submission() -> None:
+    client = DummyClient()
+    client.config.connect_timeout = 0.001
+    service = OrderService(client)  # type: ignore[arg-type]
+    sends = 0
+
+    async def no_confirmation(_destination: str, _body: object) -> None:
+        nonlocal sends
+        sends += 1
+
+    client.supervisor.send = no_confirmation  # type: ignore[method-assign]
+    request = OrderRequest("IDXUSDT", Direction.CALL, Decimal("1"), Timeframe.M1, Decimal("10"))
+    with pytest.raises(OrderSubmissionUnknownError):
+        await service.place(request)
+    with pytest.raises(OrderSubmissionUnknownError, match="reconciliation"):
+        await service.place(request)
+    assert sends == 1
+
+    late = {**lifecycle()[0], "id": "late-order"}
+    await service.handle_event("/user/topic/execute", late)
+
+    async def confirm(destination: str, _body: object) -> None:
+        nonlocal sends
+        sends += 1
+        current = {**lifecycle()[0], "id": "current-order"}
+        await service.handle_event(destination, current)
+
+    client.supervisor.send = confirm  # type: ignore[method-assign]
+    order = await service.place(request)
+    assert order.id == "current-order"
+    assert sends == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_order_lookup_includes_active_statuses_and_uses_full_pages() -> None:
+    client = DummyClient()
+    service = OrderService(client)  # type: ignore[arg-type]
+    target = {**lifecycle()[0], "id": "active-order"}
+
+    async def respond(*_args: object, **kwargs: object) -> httpx.Response:
+        client.requests.append(kwargs["params"])  # type: ignore[arg-type]
+        return httpx.Response(200, json=[target])
+
+    client._request = respond  # type: ignore[method-assign]
+    order = await service.get("active-order", refresh=True)
+
+    assert order is not None
+    assert order.status is OrderStatus.PENDING
+    assert client.requests[0]["size"] == 100
+    assert "PENDING" in str(client.requests[0]["statuses"])
+    assert "OPEN" in str(client.requests[0]["statuses"])
+
+
+@pytest.mark.asyncio
+async def test_terminal_reconciliation_enriches_financial_fields() -> None:
+    partial_payload = {
+        key: value for key, value in lifecycle()[-1].items() if key not in {"profit", "fees", "ccp"}
+    }
+    tracker = OrderTracker(parse_order(partial_payload))
+    await tracker.update(parse_order(lifecycle()[-1]))
+
+    assert tracker.order.profit == Decimal("0.96")
+    assert tracker.order.fees == Decimal("0.04")
+    assert tracker.order.close_price == Decimal("2995.83")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"direction": "SIDEWAYS"},
+        {"id": ""},
+    ],
+)
+def test_order_parser_rejects_unknown_direction_and_missing_id(changes: dict[str, str]) -> None:
+    with pytest.raises(ProtocolError):
+        parse_order({**lifecycle()[0], **changes})

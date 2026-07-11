@@ -17,12 +17,23 @@ def test_registry_deduplicates_and_reference_counts() -> None:
     assert registry.release(first.handle)[1] is True
 
 
+def test_registry_remote_ids_do_not_collide_after_churn() -> None:
+    registry = SubscriptionRegistry()
+    first, _ = registry.acquire("/topic/one")
+    second, _ = registry.acquire("/topic/two")
+    registry.release(first.handle)
+    third, _ = registry.acquire("/topic/three")
+
+    assert second.remote_id != third.remote_id
+
+
 class FakeSocket:
     def __init__(self, fail_receive: bool = False) -> None:
         self.connected = False
         self.sent: list[StompFrame] = []
         self.fail_receive = fail_receive
         self.closed = False
+        self.heartbeats = 0
 
     async def connect(self, _token: str) -> None:
         self.connected = True
@@ -37,7 +48,8 @@ class FakeSocket:
         await asyncio.sleep(60)
         return ()
 
-    async def heartbeat(self) -> None: ...
+    async def heartbeat(self) -> None:
+        self.heartbeats += 1
 
     async def close(self) -> None:
         self.closed = True
@@ -74,4 +86,25 @@ async def test_reconnect_replays_subscriptions_before_ready() -> None:
         "/user/topic/TEST",
         "/user/topic/execute",
     ]
+    await supervisor.stop()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_is_sent_periodically_while_receive_is_silent() -> None:
+    socket = FakeSocket()
+    supervisor = ConnectionSupervisor(
+        lambda: socket,
+        lambda: "token",
+        lambda _frame: asyncio.sleep(0),
+        heartbeat_interval=0.01,
+        reconnect_attempts=0,
+        base_delay=0,
+        max_delay=0,
+        jitter=0,
+    )
+
+    await supervisor.start()
+    await asyncio.sleep(0.025)
+
+    assert socket.heartbeats >= 2
     await supervisor.stop()

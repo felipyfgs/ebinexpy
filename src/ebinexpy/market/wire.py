@@ -59,12 +59,12 @@ def parse_candle(value: dict[str, Any], symbol: str, timeframe: Timeframe) -> Ca
     return candle
 
 
-def parse_ticker(value: dict[str, Any], symbol: str) -> Ticker:
+def parse_ticker(value: dict[str, Any], symbol: str, timeframe: Timeframe | None = None) -> Ticker:
     volume = value.get("volume", {})
     book = value.get("book", {})
     return Ticker(
         symbol=symbol,
-        timeframe=Timeframe(str(value.get("candleTimeFrame", "M1")).upper()),
+        timeframe=timeframe or Timeframe(str(value["candleTimeFrame"]).upper()),
         volume_24h=as_decimal(volume.get("volume24", 0)),
         bull_total=as_decimal(book.get("green", 0)),
         bear_total=as_decimal(book.get("red", 0)),

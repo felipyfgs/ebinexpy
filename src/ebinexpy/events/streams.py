@@ -44,14 +44,23 @@ class EventStream(Generic[T]):
             self._closed = True
         if not self._queue.full():
             self._queue.put_nowait(_CLOSED)
-        if self._cleanup:
-            result = self._cleanup()
+        cleanup, self._cleanup = self._cleanup, None
+        if cleanup:
+            result = cleanup()
             if result is not None:
                 await result
-            self._cleanup = None
 
     def __aiter__(self) -> AsyncIterator[T]:
-        return self
+        async def iterate() -> AsyncIterator[T]:
+            try:
+                while True:
+                    yield await self.__anext__()
+            except StopAsyncIteration:
+                return
+            finally:
+                await self.close()
+
+        return iterate()
 
     async def __anext__(self) -> T:
         if self._error:
@@ -60,7 +69,11 @@ class EventStream(Generic[T]):
             raise error
         if self._closed and self._queue.empty():
             raise StopAsyncIteration
-        item = await self._queue.get()
+        try:
+            item = await self._queue.get()
+        except asyncio.CancelledError:
+            await asyncio.shield(self.close())
+            raise
         if item is _CLOSED:
             raise StopAsyncIteration
         return item  # type: ignore[return-value]

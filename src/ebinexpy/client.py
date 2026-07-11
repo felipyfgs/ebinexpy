@@ -16,7 +16,7 @@ from .accounts.service import AccountService
 from .auth.models import Credentials
 from .auth.service import AuthService
 from .config import ClientConfig
-from .core.exceptions import AuthenticationError, NotConnectedError
+from .core.exceptions import AuthenticationError, ConnectionError, NotConnectedError
 from .events.dispatcher import EventDispatcher
 from .events.models import (
     BookEvent,
@@ -33,7 +33,7 @@ from .orders.service import OrderService
 from .raw.client import RawClient
 from .transport.http import HttpTransport
 from .transport.stomp import StompFrame
-from .transport.supervisor import ConnectionSupervisor, Socket
+from .transport.supervisor import ConnectionSupervisor, Socket, SupervisorState
 from .transport.websocket import WebSocketTransport
 
 SocketFactory = Callable[[], Socket]
@@ -64,6 +64,8 @@ class EbinexClient:
         self._execute_handle: str | None = None
         self._connect_lock = asyncio.Lock()
         self._ready = asyncio.Event()
+        self._connection_changed = asyncio.Event()
+        self._connection_error: ConnectionError | None = None
 
         self.events = EventDispatcher()
         self.auth = AuthService(self)
@@ -116,11 +118,35 @@ class EbinexClient:
             self.config.heartbeat_interval,
         )
 
+    def _on_connection_state(
+        self,
+        state: SupervisorState,
+        attempt: int,
+        error: ConnectionError | None,
+    ) -> None:
+        now = datetime.now(UTC)
+        if state is SupervisorState.CONNECTED:
+            self._connection_error = None
+            self._ready.set()
+            self.events.emit(ConnectionEvent(now, ConnectionState.CONNECTED))
+        elif state is SupervisorState.RECONNECTING:
+            self._ready.clear()
+            self.events.emit(ConnectionEvent(now, ConnectionState.RECONNECTING, attempt))
+        else:
+            self._ready.clear()
+            self._connection_error = error or ConnectionError("WebSocket disconnected")
+            self.events.emit(ConnectionEvent(now, ConnectionState.DISCONNECTED, attempt))
+        self._connection_changed.set()
+
     async def connect(self) -> None:
         """Authenticate, select the configured account and start live transport."""
         async with self._connect_lock:
             if self.connected:
                 return
+            if self._supervisor is not None and self._supervisor.running:
+                await self.wait_until_ready(timeout=self.config.connect_timeout)
+                return
+            self._connection_error = None
             self.events.emit(ConnectionEvent(datetime.now(UTC), ConnectionState.CONNECTING))
             await self.auth.ensure(self._credentials)
             await self.accounts.select(self.config.environment)
@@ -128,6 +154,7 @@ class EbinexClient:
                 self._make_socket,
                 token=lambda: self.auth.session.access_token if self.auth.session else "",
                 on_frame=self._on_frame,
+                on_state=self._on_connection_state,
                 heartbeat_interval=self.config.heartbeat_interval,
                 reconnect_attempts=self.config.reconnect_attempts,
                 base_delay=self.config.reconnect_base_delay,
@@ -150,10 +177,11 @@ class EbinexClient:
                 self._core_user_handle = None
                 self._core_environment = None
                 self._execute_handle = None
-                self.events.emit(ConnectionEvent(datetime.now(UTC), ConnectionState.DISCONNECTED))
+                if self._connection_error is None:
+                    self.events.emit(
+                        ConnectionEvent(datetime.now(UTC), ConnectionState.DISCONNECTED)
+                    )
                 raise
-            self._ready.set()
-            self.events.emit(ConnectionEvent(datetime.now(UTC), ConnectionState.CONNECTED))
 
     @staticmethod
     def _user_destination(environment: AccountEnvironment) -> str:
@@ -176,6 +204,7 @@ class EbinexClient:
         finally:
             if self._supervisor.ready:
                 self._ready.set()
+                self._connection_changed.set()
 
     async def _on_frame(self, frame: StompFrame) -> None:
         if frame.command != "MESSAGE":
@@ -191,10 +220,19 @@ class EbinexClient:
         await self.orders.handle_event(destination, payload)
 
     async def wait_until_ready(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
+        async def wait() -> None:
+            while not self._ready.is_set():
+                if self._connection_error is not None:
+                    raise self._connection_error
+                self._connection_changed.clear()
+                if self._ready.is_set() or self._connection_error is not None:
+                    continue
+                await self._connection_changed.wait()
+
         if timeout is None:
-            await self._ready.wait()
-            return
-        await asyncio.wait_for(self._ready.wait(), timeout)
+            await wait()
+        else:
+            await asyncio.wait_for(wait(), timeout)
 
     def require_supervisor(self) -> ConnectionSupervisor:
         if self._supervisor is None or not self._supervisor.ready:
@@ -205,6 +243,8 @@ class EbinexClient:
         """Stop live transport. Calling this repeatedly is safe."""
         async with self._connect_lock:
             self._ready.clear()
+            self._connection_error = None
+            self._connection_changed.set()
             supervisor, self._supervisor = self._supervisor, None
             self._core_user_handle = None
             self._core_environment = None

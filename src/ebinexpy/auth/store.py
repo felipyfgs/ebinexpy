@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -75,7 +76,6 @@ class FileSessionStore:
             self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(self.directory, 0o700)
             path = self._path(identity)
-            temporary = path.with_suffix(".tmp")
             payload = {
                 "version": 1,
                 "identity": identity,
@@ -84,11 +84,28 @@ class FileSessionStore:
                 "expires_at": session.expires_at.isoformat() if session.expires_at else None,
                 "metadata": session.metadata,
             }
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(descriptor, "w") as handle:
-                json.dump(payload, handle, separators=(",", ":"))
-            os.replace(temporary, path)
-            os.chmod(path, 0o600)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{path.name}.", suffix=".tmp", dir=self.directory
+            )
+            temporary = Path(temporary_name)
+            try:
+                os.chmod(temporary, 0o600)
+                with os.fdopen(descriptor, "w") as handle:
+                    json.dump(payload, handle, separators=(",", ":"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, path)
+                os.chmod(path, 0o600)
+                directory_descriptor = os.open(self.directory, os.O_RDONLY)
+                try:
+                    os.fsync(directory_descriptor)
+                finally:
+                    os.close(directory_descriptor)
+            finally:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
 
     async def delete(self, identity: str) -> None:
         async with self._lock:

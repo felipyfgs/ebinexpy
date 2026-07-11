@@ -37,7 +37,15 @@ def parse_order(value: dict[str, Any]) -> Order:
     try:
         status = OrderStatus(str(value["status"]).upper())
         wire_direction = str(value["direction"]).upper()
-        direction = Direction.CALL if wire_direction == "BULL" else Direction.PUT
+        if wire_direction == "BULL":
+            direction = Direction.CALL
+        elif wire_direction == "BEAR":
+            direction = Direction.PUT
+        else:
+            raise ProtocolError(f"Unknown broker order direction: {wire_direction}")
+        order_id = str(value.get("id") or "").strip()
+        if not order_id:
+            raise ProtocolError("Order broker ID is missing")
         request = OrderRequest(
             symbol=str(value["symbol"]),
             direction=direction,
@@ -53,7 +61,7 @@ def parse_order(value: dict[str, Any]) -> Order:
     scheduled = optional_time(value.get("candleStartTime"))
     expires = optional_time(value.get("candleEndTime"))
     return Order(
-        id=str(value.get("id") or ""),
+        id=order_id,
         request=request,
         status=status,
         placed_at=placed_at,

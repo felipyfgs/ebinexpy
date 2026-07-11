@@ -135,3 +135,112 @@ async def test_connect_rolls_back_when_socket_fails() -> None:
             await client.connect()
         assert not client.connected
         assert client._supervisor is None  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_reconnect_exhaustion_clears_public_state_and_wakes_waiters() -> None:
+    transport = httpx.MockTransport(broker_handler)
+    config = ClientConfig(
+        reconnect_attempts=1,
+        reconnect_base_delay=0,
+        reconnect_max_delay=0,
+        reconnect_jitter=0,
+        connect_timeout=0.5,
+    )
+
+    fail_connections = asyncio.Event()
+
+    def factory() -> FakeSocket:
+        socket = FakeSocket()
+
+        async def fail_receive() -> tuple[StompFrame, ...]:
+            await fail_connections.wait()
+            raise RuntimeError("connection lost")
+
+        socket.receive = fail_receive  # type: ignore[method-assign]
+        return socket
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://api.ebinex.com"
+    ) as http_client:
+        client = EbinexClient(
+            "identity",
+            "password",
+            config,
+            http_client=http_client,
+            socket_factory=factory,
+        )
+        await client.connect()
+        fail_connections.set()
+        for _ in range(100):
+            if not client.connected:
+                break
+            await asyncio.sleep(0.001)
+
+        assert not client.connected
+        with pytest.raises(ConnectionError, match="budget exhausted"):
+            await client.wait_until_ready(timeout=0.1)
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connect_during_reconnect_reuses_the_running_supervisor() -> None:
+    transport = httpx.MockTransport(broker_handler)
+    config = ClientConfig(
+        reconnect_attempts=2,
+        reconnect_base_delay=0,
+        reconnect_max_delay=0,
+        reconnect_jitter=0,
+        connect_timeout=0.5,
+    )
+    fail_first = asyncio.Event()
+    allow_reconnect = asyncio.Event()
+    sockets_created = 0
+
+    def factory() -> FakeSocket:
+        nonlocal sockets_created
+        sockets_created += 1
+        socket = FakeSocket()
+        if sockets_created == 1:
+
+            async def fail_receive() -> tuple[StompFrame, ...]:
+                await fail_first.wait()
+                raise RuntimeError("connection lost")
+
+            socket.receive = fail_receive  # type: ignore[method-assign]
+        else:
+            connect = socket.connect
+
+            async def delayed_connect(token: str) -> None:
+                await allow_reconnect.wait()
+                await connect(token)
+
+            socket.connect = delayed_connect  # type: ignore[method-assign]
+        return socket
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://api.ebinex.com"
+    ) as http_client:
+        client = EbinexClient(
+            "identity",
+            "password",
+            config,
+            http_client=http_client,
+            socket_factory=factory,
+        )
+        await client.connect()
+        fail_first.set()
+        for _ in range(100):
+            if not client.connected and sockets_created == 2:
+                break
+            await asyncio.sleep(0.001)
+
+        reconnect = asyncio.create_task(client.connect())
+        await asyncio.sleep(0)
+        assert sockets_created == 2
+
+        allow_reconnect.set()
+        await reconnect
+        assert client.connected
+        assert sockets_created == 2
+        await client.disconnect()

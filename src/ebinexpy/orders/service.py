@@ -33,6 +33,7 @@ class OrderService:
         self._client = client
         self._submission_lock = asyncio.Lock()
         self._confirmation: asyncio.Future[Order] | None = None
+        self._submission_uncertain = False
         self._trackers: dict[str, OrderTracker] = {}
 
     async def place(self, request: OrderRequest) -> Order:
@@ -62,16 +63,27 @@ class OrderService:
         command = execute_payload(request, account.id, boundary, price)
         supervisor = self._client.require_supervisor()
         async with self._submission_lock:
+            if self._submission_uncertain:
+                raise OrderSubmissionUnknownError(
+                    "A previous order is still awaiting reconciliation; submission is blocked"
+                )
             loop = asyncio.get_running_loop()
             self._confirmation = loop.create_future()
+            command_started = False
             try:
+                command_started = True
                 await supervisor.send("/user/topic/execute", command)
                 order = await asyncio.wait_for(
                     self._confirmation, timeout=self._client.config.connect_timeout
                 )
-            except (asyncio.CancelledError, OrderError, ProtocolError, ValidationError):
+            except asyncio.CancelledError:
+                if command_started:
+                    self._submission_uncertain = True
+                raise
+            except (OrderError, ProtocolError, ValidationError):
                 raise
             except Exception as exc:
+                self._submission_uncertain = True
                 raise OrderSubmissionUnknownError(
                     "Order send outcome is unknown; the command was not replayed"
                 ) from exc
@@ -122,27 +134,20 @@ class OrderService:
         tracker = self._trackers.get(order_id)
         if not refresh and tracker:
             return tracker.order
+        assets = await self._client.market.list_assets() if tracker is None else ()
+        symbols = (
+            (tracker.order.request.symbol,)
+            if tracker is not None
+            else tuple(asset.symbol for asset in assets)
+        )
         for page in range(10):
-            query = (
-                OrderQuery(
-                    page=page,
-                    size=100,
-                    symbols=(tracker.order.request.symbol,),
-                    timeframes=(tracker.order.request.timeframe,),
-                    statuses=tuple(OrderStatus),
-                )
-                if tracker
-                else None
+            query = OrderQuery(
+                page=page,
+                size=100,
+                symbols=symbols,
+                timeframes=(tracker.order.request.timeframe,) if tracker else tuple(Timeframe),
+                statuses=tuple(OrderStatus),
             )
-            if query is None and page:
-                default = await self._client.market.list_assets()
-                query = OrderQuery(
-                    page=page,
-                    size=100,
-                    symbols=tuple(asset.symbol for asset in default),
-                    timeframes=tuple(Timeframe),
-                    statuses=tuple(TERMINAL_STATUSES),
-                )
             orders = await self.list(query)
             if order := next((item for item in orders if item.id == order_id), None):
                 return order
@@ -177,8 +182,11 @@ class OrderService:
             if envelope.get("event") != "single_user_order":
                 return
             raw = envelope.get("payload")
+        execute_confirmation = destination == "/user/topic/execute"
+        if execute_confirmation and self._submission_uncertain:
+            self._submission_uncertain = False
         if not isinstance(raw, dict) or "status" not in raw:
-            if destination == "/user/topic/execute" and self._confirmation is not None:
+            if execute_confirmation and self._confirmation is not None:
                 error: Exception
                 if isinstance(raw, dict) and (
                     raw.get("error") or raw.get("success") is False or raw.get("accepted") is False
@@ -190,7 +198,7 @@ class OrderService:
                     self._confirmation.set_exception(error)
             return
         order = parse_order(raw)
-        if destination == "/user/topic/execute" and self._confirmation is not None:
+        if execute_confirmation and self._confirmation is not None:
             if not self._confirmation.done():
                 self._confirmation.set_result(order)
         tracker = self._trackers.get(order.id)

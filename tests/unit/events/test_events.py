@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -41,3 +42,17 @@ async def test_market_stream_coalesces_and_lossless_stream_overflows() -> None:
     lifecycle.publish(2)
     with pytest.raises(EventQueueOverflowError):
         await anext(lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_wait_releases_resources() -> None:
+    cleaned = asyncio.Event()
+    stream = EventStream[int](1, cleanup=cleaned.set)
+    consumer = asyncio.create_task(anext(stream))
+
+    await asyncio.sleep(0)
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    assert cleaned.is_set()

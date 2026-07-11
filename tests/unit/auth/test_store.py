@@ -51,6 +51,21 @@ async def test_file_store_serializes_concurrent_saves(tmp_path) -> None:
     assert restored.access_token.startswith("token-")
 
 
+@pytest.mark.asyncio
+async def test_file_store_is_atomic_across_instances(tmp_path) -> None:
+    def save(index: int) -> None:
+        asyncio.run(
+            FileSessionStore(tmp_path).save("identity", Session("identity", f"token-{index}"))
+        )
+
+    await asyncio.gather(*(asyncio.to_thread(save, index) for index in range(40)))
+
+    restored = await FileSessionStore(tmp_path).load("identity")
+    assert restored is not None
+    assert restored.access_token.startswith("token-")
+    assert not list(tmp_path.glob(".*.tmp"))
+
+
 def test_session_validates_identity_and_expiry() -> None:
     assert Session("one", "token").is_valid("one")
     assert not Session("one", "token").is_valid("two")

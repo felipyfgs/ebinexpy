@@ -6,22 +6,40 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).parents[2]
 MARKDOWN_LINK = re.compile(r"!?\[[^]]*]\(([^)]+)\)")
+GENERATED_DIRECTORIES = {
+    ".codex",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "build",
+    "dist",
+    "node_modules",
+}
 
 
 def markdown_files() -> list[Path]:
     return sorted(
         path
         for path in ROOT.rglob("*.md")
-        if ".codex" not in path.parts and "node_modules" not in path.parts
+        if GENERATED_DIRECTORIES.isdisjoint(path.relative_to(ROOT).parts)
+        and not any(part.endswith(".egg-info") for part in path.relative_to(ROOT).parts)
     )
 
 
 def test_user_facing_markdown_lives_under_docs() -> None:
-    allowed_root = {ROOT / "README.md"}
+    allowed_outside_docs = {
+        ROOT / "CHANGELOG.md",
+        ROOT / "README.md",
+        ROOT / "tests" / "contract" / "README.md",
+        ROOT / "tests" / "integration" / "demo" / "README.md",
+    }
     misplaced = [
         path
         for path in markdown_files()
-        if path not in allowed_root
+        if path not in allowed_outside_docs
         and ROOT / "docs" not in path.parents
         and ROOT / "openspec" not in path.parents
     ]

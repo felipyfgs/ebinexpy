@@ -24,6 +24,12 @@ dependencies = [
     "websockets>=14,<17",
 ]
 
+[project.urls]
+Homepage = "https://github.com/felipyfgs/ebinexpy"
+Documentation = "https://github.com/felipyfgs/ebinexpy/tree/main/docs"
+Repository = "https://github.com/felipyfgs/ebinexpy.git"
+Issues = "https://github.com/felipyfgs/ebinexpy/issues"
+
 [project.optional-dependencies]
 dev = [
     "build>=1.2",
